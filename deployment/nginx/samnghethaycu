@@ -1,0 +1,297 @@
+# Sam Nghe Thay Cu - Nginx Configuration
+# This file will be placed at: /etc/nginx/sites-available/samnghethaycu
+# VPS IP: 69.62.82.145
+
+# Rate limiting zones (defined globally)
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
+limit_req_zone $binary_remote_addr zone=admin_limit:10m rate=5r/s;
+limit_req_zone $binary_remote_addr zone=storefront_limit:10m rate=20r/s;
+
+# Upstream definitions (Docker containers on localhost)
+upstream backend_api {
+    server localhost:9000 max_fails=3 fail_timeout=30s;
+    keepalive 32;
+}
+
+upstream backend_admin {
+    server localhost:7001 max_fails=3 fail_timeout=30s;
+    keepalive 32;
+}
+
+upstream storefront {
+    server localhost:3000 max_fails=3 fail_timeout=30s;
+    keepalive 32;
+}
+
+# ============================================================
+# STOREFRONT - samnghethaycu.com
+# ============================================================
+server {
+    listen 80;
+    listen [::]:80;
+    server_name samnghethaycu.com www.samnghethaycu.com;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Logs
+    access_log /var/log/nginx/storefront_access.log;
+    error_log /var/log/nginx/storefront_error.log warn;
+
+    # Rate limiting
+    limit_req zone=storefront_limit burst=50 nodelay;
+    limit_req_status 429;
+
+    # Client settings
+    client_max_body_size 10M;
+    client_body_timeout 60s;
+    client_header_timeout 60s;
+
+    # Root location - Next.js storefront
+    location / {
+        proxy_pass http://storefront;
+        proxy_http_version 1.1;
+
+        # Proxy headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+
+        # Connection headers (keep-alive)
+        proxy_set_header Connection "";
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+
+        # Buffering
+        proxy_buffering on;
+        proxy_buffer_size 4k;
+        proxy_buffers 8 4k;
+        proxy_busy_buffers_size 8k;
+
+        # Cache bypass for Next.js hot reload
+        proxy_redirect off;
+    }
+
+    # Next.js static files (_next/)
+    location /_next/static/ {
+        proxy_pass http://storefront;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        # Cache static files
+        proxy_cache_valid 200 60m;
+        add_header Cache-Control "public, max-age=3600, immutable";
+    }
+
+    # Favicon and robots
+    location = /favicon.ico {
+        proxy_pass http://storefront;
+        access_log off;
+        log_not_found off;
+    }
+
+    location = /robots.txt {
+        proxy_pass http://storefront;
+        access_log off;
+        log_not_found off;
+    }
+
+    # Health check endpoint
+    location /health {
+        access_log off;
+        return 200 "OK\n";
+        add_header Content-Type text/plain;
+    }
+}
+
+# ============================================================
+# BACKEND API - api.samnghethaycu.com
+# ============================================================
+server {
+    listen 80;
+    listen [::]:80;
+    server_name api.samnghethaycu.com;
+
+    # Security headers
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Logs
+    access_log /var/log/nginx/api_access.log;
+    error_log /var/log/nginx/api_error.log warn;
+
+    # Rate limiting (stricter for API)
+    limit_req zone=api_limit burst=20 nodelay;
+    limit_req_status 429;
+
+    # Client settings (larger for product uploads)
+    client_max_body_size 50M;
+    client_body_timeout 120s;
+    client_header_timeout 60s;
+
+    # Root location - Medusa Backend API
+    location / {
+        proxy_pass http://backend_api;
+        proxy_http_version 1.1;
+
+        # Proxy headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+
+        # Connection headers
+        proxy_set_header Connection "";
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Timeouts (longer for uploads)
+        proxy_connect_timeout 120s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
+
+        # Buffering (disabled for uploads)
+        proxy_buffering off;
+        proxy_request_buffering off;
+
+        # No redirects
+        proxy_redirect off;
+    }
+
+    # File uploads endpoint (even longer timeout)
+    location /uploads {
+        proxy_pass http://backend_api;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Extended timeouts for large files
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+
+        # No buffering for uploads
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+
+    # Health check
+    location /health {
+        proxy_pass http://backend_api/health;
+        access_log off;
+    }
+}
+
+# ============================================================
+# ADMIN PANEL - admin.samnghethaycu.com
+# ============================================================
+server {
+    listen 80;
+    listen [::]:80;
+    server_name admin.samnghethaycu.com;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Logs
+    access_log /var/log/nginx/admin_access.log;
+    error_log /var/log/nginx/admin_error.log warn;
+
+    # Rate limiting (moderate)
+    limit_req zone=admin_limit burst=10 nodelay;
+    limit_req_status 429;
+
+    # Client settings
+    client_max_body_size 50M;
+    client_body_timeout 120s;
+    client_header_timeout 60s;
+
+    # Root location - Medusa Admin Panel
+    location / {
+        proxy_pass http://backend_admin;
+        proxy_http_version 1.1;
+
+        # Proxy headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+
+        # WebSocket support (CRITICAL for Admin Panel)
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Timeouts
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+
+        # Buffering
+        proxy_buffering on;
+        proxy_buffer_size 4k;
+        proxy_buffers 8 4k;
+
+        # No redirects
+        proxy_redirect off;
+    }
+
+    # Admin static files
+    location ~ ^/(assets|images|fonts)/ {
+        proxy_pass http://backend_admin;
+        proxy_http_version 1.1;
+
+        # Cache static assets
+        proxy_cache_valid 200 30m;
+        add_header Cache-Control "public, max-age=1800";
+    }
+
+    # Health check
+    location /health {
+        access_log off;
+        return 200 "Admin OK\n";
+        add_header Content-Type text/plain;
+    }
+}
+
+# ============================================================
+# GZIP COMPRESSION (Global)
+# ============================================================
+gzip on;
+gzip_vary on;
+gzip_proxied any;
+gzip_comp_level 6;
+gzip_types
+    text/plain
+    text/css
+    text/xml
+    text/javascript
+    application/json
+    application/javascript
+    application/xml+rss
+    application/rss+xml
+    application/atom+xml
+    image/svg+xml;
+gzip_disable "msie6";
