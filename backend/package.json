@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "medusa develop",
-    "build": "medusa build",
+    "build": "tsc -p tsconfig.json",
     "start": "medusa start",
     "migration:generate": "medusa migrations generate",
     "migration:run": "medusa migrations run",
