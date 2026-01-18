@@ -1,0 +1,26 @@
+{
+  "name": "samnghethaycu-monorepo",
+  "version": "0.1.0",
+  "description": "Sam Nghe Thay Cu - Content-Driven E-commerce Platform",
+  "private": true,
+  "scripts": {
+    "docker:up": "docker-compose up --build",
+    "docker:down": "docker-compose down",
+    "docker:clean": "docker-compose down -v",
+    "docker:logs": "docker-compose logs -f",
+    "backend:install": "cd backend && npm install",
+    "storefront:install": "cd storefront && npm install",
+    "install:all": "npm run backend:install && npm run storefront:install",
+    "setup": "npm run install:all && cp backend/.env.template backend/.env && cp storefront/.env.template storefront/.env"
+  },
+  "keywords": [
+    "ecommerce",
+    "medusa",
+    "nextjs",
+    "organic-food",
+    "traditional-medicine",
+    "content-driven-commerce"
+  ],
+  "author": "Sam Nghe Thay Cu Team",
+  "license": "MIT"
+}
