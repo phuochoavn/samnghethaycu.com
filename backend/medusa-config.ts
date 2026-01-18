@@ -9,6 +9,13 @@ loadEnv(process.env.NODE_ENV || "development", process.cwd());
 export default defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
+    // --- THÊM ĐOẠN NÀY ĐỂ TẮT SSL ---
+    databaseDriverOptions: {
+      connection: {
+        ssl: false,
+      },
+    },
+    // --------------------------------
     http: {
       storeCors: process.env.STORE_CORS || "http://localhost:3000,http://localhost:8000",
       adminCors: process.env.ADMIN_CORS || "http://localhost:7001,http://localhost:7000",
@@ -16,7 +23,6 @@ export default defineConfig({
       jwtSecret: process.env.JWT_SECRET || "supersecret",
       cookieSecret: process.env.COOKIE_SECRET || "supersecret",
     },
-    // Quan trọng: Định nghĩa Redis URL ở đây cho worker dùng chung
     redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
     workerMode: process.env.MEDUSA_WORKER_MODE as "shared" | "worker" | "server",
   },
@@ -25,7 +31,7 @@ export default defineConfig({
   },
   modules: [
     {
-      key: "cache", // <--- QUAN TRỌNG: Phải có dòng này
+      key: "cache",
       resolve: "@medusajs/cache-redis",
       options: {
         redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
@@ -33,27 +39,10 @@ export default defineConfig({
       },
     },
     {
-      key: "event_bus", // <--- QUAN TRỌNG: Phải có dòng này
+      key: "event_bus",
       resolve: "@medusajs/event-bus-redis",
       options: {
         redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
-      },
-    },
-    {
-      key: "workflow_engine", // <--- QUAN TRỌNG: Phải có dòng này
-      resolve: "@medusajs/workflow-engine-redis",
-      options: {
-        redis: {
-          url: process.env.REDIS_URL || "redis://localhost:6379",
-        },
-      },
-    },
-    {
-      key: "file", // Nên thêm key cho module file luôn cho chuẩn v2
-      resolve: "@medusajs/file-local",
-      options: {
-        upload_dir: "uploads",
-        backend_url: process.env.MEDUSA_BACKEND_URL || "http://localhost:9000",
       },
     },
   ],
