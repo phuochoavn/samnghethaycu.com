@@ -9,6 +9,13 @@ loadEnv(process.env.NODE_ENV || "development", process.cwd());
 export default defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
+    // --- THÊM ĐOẠN NÀY ĐỂ TẮT SSL ---
+    databaseDriverOptions: {
+      connection: {
+        ssl: false,
+      },
+    },
+    // --------------------------------
     http: {
       storeCors: process.env.STORE_CORS || "http://localhost:3000,http://localhost:8000",
       adminCors: process.env.ADMIN_CORS || "http://localhost:7001,http://localhost:7000",
@@ -16,7 +23,6 @@ export default defineConfig({
       jwtSecret: process.env.JWT_SECRET || "supersecret",
       cookieSecret: process.env.COOKIE_SECRET || "supersecret",
     },
-    // Quan trọng: Định nghĩa Redis URL ở đây cho worker dùng chung
     redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
     workerMode: process.env.MEDUSA_WORKER_MODE as "shared" | "worker" | "server",
   },
@@ -39,6 +45,5 @@ export default defineConfig({
         redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
       },
     },
-    // Đã xóa workflow_engine để hệ thống tự dùng mặc định (tránh lỗi conflict)
   ],
 });
