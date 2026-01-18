@@ -1,0 +1,28 @@
+{
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/.next/**": true,
+    "**/.medusa/**": true,
+    "**/postgres_data/**": true,
+    "**/redis_data/**": true,
+    "**/meili_data/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/.next": true,
+    "**/.medusa": true,
+    "**/postgres_data": true,
+    "**/yarn.lock": true,
+    "**/package-lock.json": true
+  },
+  "files.exclude": {
+    "**/.git": true,
+    "**/.DS_Store": true,
+    "**/postgres_data": true,
+    "**/redis_data": true
+  }
+}
