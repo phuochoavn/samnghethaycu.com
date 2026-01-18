@@ -39,14 +39,6 @@ export default defineConfig({
         redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
       },
     },
-    {
-      key: "workflow_engine",
-      resolve: "@medusajs/workflow-engine-redis",
-      options: {
-        redis: {
-          url: process.env.REDIS_URL || "redis://localhost:6379",
-        },
-      },
-    },
+    // Đã xóa workflow_engine để hệ thống tự dùng mặc định (tránh lỗi conflict)
   ],
 });
