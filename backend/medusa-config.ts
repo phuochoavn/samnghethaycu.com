@@ -25,7 +25,7 @@ export default defineConfig({
   },
   modules: [
     {
-      key: "cache", // <--- QUAN TRỌNG: Phải có dòng này
+      key: "cache",
       resolve: "@medusajs/cache-redis",
       options: {
         redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
@@ -33,27 +33,19 @@ export default defineConfig({
       },
     },
     {
-      key: "event_bus", // <--- QUAN TRỌNG: Phải có dòng này
+      key: "event_bus",
       resolve: "@medusajs/event-bus-redis",
       options: {
         redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
       },
     },
     {
-      key: "workflow_engine", // <--- QUAN TRỌNG: Phải có dòng này
+      key: "workflow_engine",
       resolve: "@medusajs/workflow-engine-redis",
       options: {
         redis: {
           url: process.env.REDIS_URL || "redis://localhost:6379",
         },
-      },
-    },
-    {
-      key: "file", // Nên thêm key cho module file luôn cho chuẩn v2
-      resolve: "@medusajs/file-local",
-      options: {
-        upload_dir: "uploads",
-        backend_url: process.env.MEDUSA_BACKEND_URL || "http://localhost:9000",
       },
     },
   ],
