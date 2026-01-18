@@ -1,0 +1,109 @@
+version: "3.8"
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: samnghethaycu_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: medusa
+      POSTGRES_PASSWORD: medusa
+      POSTGRES_DB: medusa_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medusa"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - samnghethaycu_network
+
+  # Redis Cache & Event Bus
+  redis:
+    image: redis:7-alpine
+    container_name: samnghethaycu_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - samnghethaycu_network
+
+  # Medusa v2 Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: samnghethaycu_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://medusa:medusa@postgres:5432/medusa_db
+      REDIS_URL: redis://redis:6379
+      MEDUSA_BACKEND_URL: http://localhost:9000
+      JWT_SECRET: supersecret_change_in_production
+      COOKIE_SECRET: supersecret_change_in_production
+      STORE_CORS: http://localhost:3000,http://localhost:8000
+      ADMIN_CORS: http://localhost:7001,http://localhost:7000
+      AUTH_CORS: http://localhost:3000,http://localhost:7001
+      MEDUSA_WORKER_MODE: shared
+    ports:
+      - "9000:9000"
+      - "7001:7001"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - backend_uploads:/app/uploads
+    command: npm run dev
+    networks:
+      - samnghethaycu_network
+
+  # Next.js Storefront
+  storefront:
+    build:
+      context: ./storefront
+      dockerfile: Dockerfile
+    container_name: samnghethaycu_storefront
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_MEDUSA_BACKEND_URL: http://localhost:9000
+      NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY: ""
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./storefront:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
+    networks:
+      - samnghethaycu_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  backend_uploads:
+    driver: local
+
+networks:
+  samnghethaycu_network:
+    driver: bridge
