@@ -1,7 +1,7 @@
 version: "3.8"
 
 services:
-  # PostgreSQL Database
+  # PostgreSQL Database (Internal Only)
   postgres:
     image: postgres:16-alpine
     container_name: samnghethaycu_postgres
@@ -10,8 +10,7 @@ services:
       POSTGRES_USER: medusa
       POSTGRES_PASSWORD: medusa
       POSTGRES_DB: medusa_db
-    ports:
-      - "5432:5432"
+    # NO PORT MAPPING - Internal access only
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,13 +21,12 @@ services:
     networks:
       - samnghethaycu_network
 
-  # Redis Cache & Event Bus
+  # Redis Cache & Event Bus (Internal Only)
   redis:
     image: redis:7-alpine
     container_name: samnghethaycu_redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    # NO PORT MAPPING - Internal access only
     volumes:
       - redis_data:/data
     healthcheck:
@@ -39,7 +37,7 @@ services:
     networks:
       - samnghethaycu_network
 
-  # Medusa v2 Backend
+  # Medusa v2 Backend (API + Admin)
   backend:
     build:
       context: ./backend
@@ -52,25 +50,42 @@ services:
       redis:
         condition: service_healthy
     environment:
-      NODE_ENV: development
+      NODE_ENV: production
       DATABASE_URL: postgresql://medusa:medusa@postgres:5432/medusa_db
       REDIS_URL: redis://redis:6379
-      MEDUSA_BACKEND_URL: http://localhost:9000
+      MEDUSA_BACKEND_URL: https://api.samnghethaycu.com
       JWT_SECRET: supersecret_change_in_production
       COOKIE_SECRET: supersecret_change_in_production
-      STORE_CORS: http://localhost:3000,http://localhost:8000
-      ADMIN_CORS: http://localhost:7001,http://localhost:7000
-      AUTH_CORS: http://localhost:3000,http://localhost:7001
+      STORE_CORS: https://samnghethaycu.com,https://www.samnghethaycu.com
+      ADMIN_CORS: https://admin.samnghethaycu.com
+      AUTH_CORS: https://samnghethaycu.com,https://www.samnghethaycu.com,https://admin.samnghethaycu.com
       MEDUSA_WORKER_MODE: shared
-    ports:
-      - "9000:9000"
-      - "7001:7001"
+    # NO PORT MAPPING - Traefik handles external access
     volumes:
       - ./backend:/app
       - /app/node_modules
       - backend_uploads:/app/uploads
     command: npm run dev
+    labels:
+      # Enable Traefik
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+
+      # API Router (api.samnghethaycu.com → port 9000)
+      - "traefik.http.routers.samnghethaycu-api.rule=Host(`api.samnghethaycu.com`)"
+      - "traefik.http.routers.samnghethaycu-api.entrypoints=websecure"
+      - "traefik.http.routers.samnghethaycu-api.tls.certresolver=le"
+      - "traefik.http.routers.samnghethaycu-api.service=samnghethaycu-api-service"
+      - "traefik.http.services.samnghethaycu-api-service.loadbalancer.server.port=9000"
+
+      # Admin Router (admin.samnghethaycu.com → port 7001)
+      - "traefik.http.routers.samnghethaycu-admin.rule=Host(`admin.samnghethaycu.com`)"
+      - "traefik.http.routers.samnghethaycu-admin.entrypoints=websecure"
+      - "traefik.http.routers.samnghethaycu-admin.tls.certresolver=le"
+      - "traefik.http.routers.samnghethaycu-admin.service=samnghethaycu-admin-service"
+      - "traefik.http.services.samnghethaycu-admin-service.loadbalancer.server.port=7001"
     networks:
+      - traefik-public
       - samnghethaycu_network
 
   # Next.js Storefront
@@ -83,17 +98,31 @@ services:
     depends_on:
       - backend
     environment:
-      NODE_ENV: development
-      NEXT_PUBLIC_MEDUSA_BACKEND_URL: http://localhost:9000
+      NODE_ENV: production
+      NEXT_PUBLIC_MEDUSA_BACKEND_URL: https://api.samnghethaycu.com
       NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY: ""
-    ports:
-      - "3000:3000"
+    # NO PORT MAPPING - Traefik handles external access
     volumes:
       - ./storefront:/app
       - /app/node_modules
       - /app/.next
     command: npm run dev
+    labels:
+      # Enable Traefik
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+
+      # Storefront Router (samnghethaycu.com + www → port 3000)
+      - "traefik.http.routers.samnghethaycu-storefront.rule=Host(`samnghethaycu.com`) || Host(`www.samnghethaycu.com`)"
+      - "traefik.http.routers.samnghethaycu-storefront.entrypoints=websecure"
+      - "traefik.http.routers.samnghethaycu-storefront.tls.certresolver=le"
+      - "traefik.http.services.samnghethaycu-storefront.loadbalancer.server.port=3000"
+
+      # HTTP to HTTPS redirect middleware
+      - "traefik.http.middlewares.samnghethaycu-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.samnghethaycu-redirect.redirectscheme.permanent=true"
     networks:
+      - traefik-public
       - samnghethaycu_network
 
 volumes:
@@ -105,5 +134,10 @@ volumes:
     driver: local
 
 networks:
+  # Internal network for backend-postgres-redis communication
   samnghethaycu_network:
     driver: bridge
+
+  # External Traefik network (must exist on VPS)
+  traefik-public:
+    external: true

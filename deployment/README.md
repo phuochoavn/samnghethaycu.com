@@ -1,9 +1,10 @@
 # Sam Nghe Thay Cu - Deployment Files
 
-This directory contains all production deployment configurations and scripts for Sam Nghe Thay Cu e-commerce platform.
+This directory contains all production deployment configurations for Sam Nghe Thay Cu e-commerce platform.
 
 **VPS IP**: 69.62.82.145
 **Domain**: samnghethaycu.com
+**Reverse Proxy**: Traefik (Existing Infrastructure)
 
 ---
 
@@ -11,11 +12,7 @@ This directory contains all production deployment configurations and scripts for
 
 ```
 deployment/
-├── nginx/
-│   ├── samnghethaycu          # Nginx site configuration
-│   └── setup-ssl.sh           # SSL certificate setup script
-├── DEPLOYMENT-GUIDE.md        # Complete step-by-step deployment guide
-├── QUICK-REFERENCE.md         # Quick command reference
+├── TRAEFIK-DEPLOYMENT.md      # Complete Traefik integration guide
 └── README.md                  # This file
 ```
 
@@ -23,127 +20,111 @@ deployment/
 
 ## 🚀 Quick Start
 
-### For Initial Deployment (Stage 1 & 2):
+### Traefik Integration (Leverages Existing Infrastructure)
+
+This project integrates with your **existing Traefik reverse proxy** instead of installing Nginx. This prevents port conflicts and leverages your existing SSL automation.
 
 ```bash
-# 1. Install Nginx
-sudo apt update && sudo apt install nginx -y
+# 1. Navigate to project directory
+cd ~/samnghethaycu.com
 
-# 2. Deploy Nginx configuration
-sudo cp ~/samnghethaycu.com/deployment/nginx/samnghethaycu /etc/nginx/sites-available/
-sudo ln -s /etc/nginx/sites-available/samnghethaycu /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t
-sudo systemctl reload nginx
+# 2. Update environment variables (see TRAEFIK-DEPLOYMENT.md)
+nano backend/.env
+nano storefront/.env
 
-# 3. Setup SSL
-chmod +x ~/samnghethaycu.com/deployment/nginx/setup-ssl.sh
-sudo ~/samnghethaycu.com/deployment/nginx/setup-ssl.sh
+# 3. Deploy with Docker Compose
+docker-compose up -d
+
+# 4. Verify deployment
+curl -I https://samnghethaycu.com
+curl -I https://api.samnghethaycu.com
+curl -I https://admin.samnghethaycu.com
 ```
 
 ---
 
 ## 📚 Documentation
 
-### [DEPLOYMENT-GUIDE.md](./DEPLOYMENT-GUIDE.md)
-Complete step-by-step guide for production deployment including:
-- Nginx installation & configuration
-- SSL/TLS setup with Let's Encrypt
-- Environment hardening
-- Firewall configuration
-- Database backup setup
-- Monitoring & logging
-- Troubleshooting
+### [TRAEFIK-DEPLOYMENT.md](./TRAEFIK-DEPLOYMENT.md)
+Complete guide for Traefik integration including:
+- Architecture overview
+- How Traefik auto-discovery works
+- Environment configuration
+- Step-by-step deployment
+- Verification procedures
+- Troubleshooting common issues
+- Security best practices
+- Monitoring & maintenance
 
 **Read this first** if you're deploying for the first time.
 
 ---
 
-### [QUICK-REFERENCE.md](./QUICK-REFERENCE.md)
-Quick command reference for:
-- Docker commands
-- Nginx management
-- SSL/TLS management
-- Database operations
-- Monitoring & debugging
-- Emergency procedures
+## 🔧 Architecture Overview
 
-**Bookmark this** for daily operations.
+### Traefik Integration
 
----
+This project uses **Docker labels** to integrate with your existing Traefik reverse proxy:
 
-## 🔧 Configuration Files
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.*.rule=Host(`domain.com`)"
+  - "traefik.http.routers.*.entrypoints=websecure"
+  - "traefik.http.routers.*.tls.certresolver=le"
+```
 
-### `nginx/samnghethaycu`
-Nginx site configuration with:
-- Reverse proxy for 3 domains (storefront, API, admin)
-- Rate limiting
-- WebSocket support for Admin Panel
-- Gzip compression
-- Security headers
-- 50M max upload size
-- Optimized timeouts and buffering
-
-**Deployment path**: `/etc/nginx/sites-available/samnghethaycu`
-
----
-
-### `nginx/setup-ssl.sh`
-Automated SSL setup script that:
-- Installs Certbot
-- Verifies DNS records
-- Obtains SSL certificates for all domains
-- Configures HTTP → HTTPS redirect
-- Enables HSTS and OCSP stapling
-- Tests automatic renewal
-- Configures strong SSL parameters (A+ rating)
-
-**Usage**: `sudo ./setup-ssl.sh`
+**Benefits:**
+- ✅ No port conflicts with existing services
+- ✅ Automatic SSL certificate generation
+- ✅ HTTP → HTTPS redirect handled by Traefik
+- ✅ Consistent with other VPS services
+- ✅ No additional Nginx/Certbot installation needed
 
 ---
 
 ## ✅ Deployment Checklist
 
-Before running deployment scripts, ensure:
+Before deploying, ensure:
 
 - [ ] VPS is running Ubuntu/Debian
 - [ ] Docker and Docker Compose are installed
+- [ ] **Traefik is running** on the VPS
+- [ ] **`traefik-public` network exists** (`docker network ls`)
 - [ ] DNS A records point to VPS IP (69.62.82.145):
   - [ ] samnghethaycu.com
   - [ ] www.samnghethaycu.com
   - [ ] api.samnghethaycu.com
   - [ ] admin.samnghethaycu.com
-- [ ] Docker containers are running (backend, storefront, postgres, redis)
-- [ ] Firewall allows ports 22, 80, 443
-- [ ] You have an email address for SSL notifications
+- [ ] You have generated secure JWT and Cookie secrets
 
 ---
 
-## 🎯 Deployment Stages
+## 🎯 Deployment Steps
 
-### Stage 1: Nginx Setup (20 minutes)
-- Install Nginx
-- Deploy configuration
-- Test HTTP access
+### Step 1: Environment Configuration (10 minutes)
+- Generate secure secrets (JWT, Cookie)
+- Update `backend/.env` with HTTPS URLs
+- Update `storefront/.env` with HTTPS backend URL
+- Set production CORS policies
 
-### Stage 2: SSL/TLS (30 minutes)
-- Verify DNS propagation
-- Run SSL setup script
-- Test HTTPS access
+### Step 2: Deploy Containers (5 minutes)
+- Run `docker-compose up -d`
+- Verify all containers are running
+- Check Traefik discovered services
 
-### Stage 3: Environment Hardening (30 minutes)
-- Generate secure secrets
-- Update .env files
-- Configure firewall
-- Restart containers
+### Step 3: Database Initialization (5 minutes)
+- Run migrations: `npx medusa db:migrate`
+- Create admin user
+- Test admin login
 
-### Stage 4: Backup & Monitoring (30 minutes)
-- Setup database backups
-- Configure log rotation
-- Test backup script
-- Schedule cron jobs
+### Step 4: Verification (10 minutes)
+- Test HTTPS access to all domains
+- Verify SSL certificates auto-generated
+- Test storefront → backend communication
+- Check for CORS errors
 
-**Total Time**: ~2 hours
+**Total Time**: ~30 minutes (much faster than Nginx setup!)
 
 ---
 
@@ -154,7 +135,7 @@ If you encounter issues:
 1. **Check logs**:
    ```bash
    docker-compose logs -f
-   sudo tail -f /var/log/nginx/error.log
+   docker logs <traefik-container-id>
    ```
 
 2. **Verify DNS**:
@@ -162,36 +143,43 @@ If you encounter issues:
    dig +short samnghethaycu.com
    ```
 
-3. **Check SSL**:
+3. **Check Traefik**:
    ```bash
-   sudo certbot certificates
+   docker ps | grep traefik
+   docker logs <traefik-container-id> --tail 50
    ```
 
-4. **Run diagnostics** (see QUICK-REFERENCE.md)
+4. **Verify network**:
+   ```bash
+   docker network ls | grep traefik
+   ```
 
 ---
 
 ## 🔄 Updates
 
-To update deployment files:
+To update deployment:
 
 ```bash
 cd ~/samnghethaycu.com
 git pull
 
-# If Nginx config changed:
-sudo cp deployment/nginx/samnghethaycu /etc/nginx/sites-available/
-sudo nginx -t
-sudo systemctl reload nginx
+# Rebuild and restart
+docker-compose up -d --build
+
+# Check logs
+docker-compose logs -f
 ```
+
+**No Traefik config changes needed** - labels are in `docker-compose.yml`
 
 ---
 
 ## 🔐 Security Notes
 
-1. **SSL Certificates**: Auto-renew every 90 days via Certbot timer
-2. **Firewall**: Only ports 22, 80, 443 are open
-3. **Rate Limiting**: Enabled for all services
+1. **SSL Certificates**: Auto-generated and renewed by Traefik
+2. **No Port Exposure**: Services only accessible via Traefik
+3. **Internal Network**: Postgres/Redis not exposed externally
 4. **Secrets**: Must be changed from defaults in .env files
 5. **CORS**: Restricted to production domains only
 
@@ -201,22 +189,26 @@ sudo systemctl reload nginx
 
 Key monitoring points:
 
-- **SSL Expiry**: `sudo certbot certificates`
-- **Disk Space**: `df -h`
 - **Container Health**: `docker-compose ps`
-- **Nginx Status**: `sudo systemctl status nginx`
-- **Logs**: `/var/log/nginx/` and `docker-compose logs`
+- **Traefik Status**: `docker ps | grep traefik`
+- **SSL Certificates**: Check via browser (should auto-renew)
+- **Disk Space**: `df -h`
+- **Logs**: `docker-compose logs -f`
 
 ---
 
-## 🚨 Emergency Contacts
+## 🚨 Troubleshooting
 
-**SSL Issues**: Check [DEPLOYMENT-GUIDE.md](./DEPLOYMENT-GUIDE.md) → Troubleshooting
-**Docker Issues**: Check [QUICK-REFERENCE.md](./QUICK-REFERENCE.md) → Emergency Commands
-**Nginx Issues**: Check logs at `/var/log/nginx/error.log`
+**Common Issues:**
+- Network not found → Create `traefik-public` network
+- 404 errors → Check Traefik logs for service discovery
+- SSL errors → Wait 1-2 minutes for certificate generation
+- CORS errors → Check backend/.env CORS settings
+
+**Full troubleshooting guide**: [TRAEFIK-DEPLOYMENT.md](./TRAEFIK-DEPLOYMENT.md)
 
 ---
 
 **Last Updated**: 2026-01-18
-**Version**: 1.0.0
+**Version**: 2.0.0 (Traefik Integration)
 **Status**: Production Ready ✅
