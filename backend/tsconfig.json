@@ -33,6 +33,6 @@
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true
   },
-  "include": ["src"],
+  "include": ["src/**/*", "medusa-config.ts"], 
   "exclude": ["node_modules", "dist"]
 }
