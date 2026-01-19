@@ -60,12 +60,10 @@ services:
       ADMIN_CORS: https://admin.samnghethaycu.com
       AUTH_CORS: https://samnghethaycu.com,https://www.samnghethaycu.com,https://admin.samnghethaycu.com
       MEDUSA_WORKER_MODE: shared
-    # NO PORT MAPPING - Traefik handles external access
+    # PRODUCTION: Only mount uploads volume for persistence
+    # DO NOT mount source code - use built image
     volumes:
-      - ./backend:/app
-      - /app/node_modules
       - backend_uploads:/app/uploads
-    command: npm run dev
     labels:
       # Enable Traefik
       - "traefik.enable=true"
@@ -101,12 +99,8 @@ services:
       NODE_ENV: production
       NEXT_PUBLIC_MEDUSA_BACKEND_URL: https://api.samnghethaycu.com
       NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY: ""
-    # NO PORT MAPPING - Traefik handles external access
-    volumes:
-      - ./storefront:/app
-      - /app/node_modules
-      - /app/.next
-    command: npm run dev
+    # PRODUCTION: No volume mounts - use built image
+    # Storefront runs in standalone mode (see next.config.ts)
     labels:
       # Enable Traefik
       - "traefik.enable=true"
