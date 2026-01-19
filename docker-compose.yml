@@ -37,7 +37,7 @@ services:
     networks:
       - samnghethaycu_network
 
-  # Medusa v2 Backend (API + Admin)
+  # Medusa v2 Backend (API + Admin on port 9000)
   backend:
     build:
       context: ./backend
@@ -60,8 +60,9 @@ services:
       ADMIN_CORS: https://admin.samnghethaycu.com
       AUTH_CORS: https://samnghethaycu.com,https://www.samnghethaycu.com,https://admin.samnghethaycu.com
       MEDUSA_WORKER_MODE: shared
-    # PRODUCTION: Only mount uploads volume for persistence
-    # DO NOT mount source code - use built image
+    # PRODUCTION-READY: CRITICAL - Only mount uploads volume
+    # DO NOT mount source code (./backend:/app) - this would shadow built files!
+    # The built artifacts (.medusa/admin, dist/) are inside the Docker image
     volumes:
       - backend_uploads:/app/uploads
     labels:
@@ -69,19 +70,24 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
 
-      # API Router (api.samnghethaycu.com → port 9000)
+      # API Router (api.samnghethaycu.com → backend:9000)
       - "traefik.http.routers.samnghethaycu-api.rule=Host(`api.samnghethaycu.com`)"
       - "traefik.http.routers.samnghethaycu-api.entrypoints=websecure"
       - "traefik.http.routers.samnghethaycu-api.tls.certresolver=le"
       - "traefik.http.routers.samnghethaycu-api.service=samnghethaycu-api-service"
       - "traefik.http.services.samnghethaycu-api-service.loadbalancer.server.port=9000"
 
-      # Admin Router (admin.samnghethaycu.com → port 7001)
+      # FIXED: Admin Router (admin.samnghethaycu.com → backend:9000/app)
+      # In Medusa v2, admin UI is served from backend on port 9000 at /app path
       - "traefik.http.routers.samnghethaycu-admin.rule=Host(`admin.samnghethaycu.com`)"
       - "traefik.http.routers.samnghethaycu-admin.entrypoints=websecure"
       - "traefik.http.routers.samnghethaycu-admin.tls.certresolver=le"
       - "traefik.http.routers.samnghethaycu-admin.service=samnghethaycu-admin-service"
-      - "traefik.http.services.samnghethaycu-admin-service.loadbalancer.server.port=7001"
+      # CRITICAL FIX: Admin uses port 9000 (same as API), not 7001
+      - "traefik.http.services.samnghethaycu-admin-service.loadbalancer.server.port=9000"
+      # Optional: Add path prefix middleware if needed (Medusa serves admin at /app by default)
+      # - "traefik.http.middlewares.admin-stripprefix.stripprefix.prefixes=/app"
+      # - "traefik.http.routers.samnghethaycu-admin.middlewares=admin-stripprefix"
     networks:
       - traefik-public
       - samnghethaycu_network
@@ -99,8 +105,7 @@ services:
       NODE_ENV: production
       NEXT_PUBLIC_MEDUSA_BACKEND_URL: https://api.samnghethaycu.com
       NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY: ""
-    # PRODUCTION: No volume mounts - use built image
-    # Storefront runs in standalone mode (see next.config.ts)
+    # PRODUCTION-READY: No volume mounts - use built Next.js standalone image
     labels:
       # Enable Traefik
       - "traefik.enable=true"
