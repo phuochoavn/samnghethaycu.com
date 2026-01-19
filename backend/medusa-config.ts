@@ -36,13 +36,13 @@ export default defineConfig({
    *
    * - disable: false → FORCES admin build in Docker/CI environments
    * - path: "/app" → URL path where admin UI is served
-   * - outDir: ".medusa/admin" → Where admin build is located (runtime expects it here)
    * - backendUrl: Production API URL (browser needs to reach this)
+   *
+   * Note: Admin build location is handled by Dockerfile (moves dist/public/admin → .medusa/admin)
    */
   admin: {
     disable: false, // ✅ CRITICAL: Force admin build (fixes "No such file or directory")
     path: "/app", // Admin UI served at https://api.samnghethaycu.com/app
-    outDir: ".medusa/admin", // Runtime location for admin build
     backendUrl: process.env.MEDUSA_BACKEND_URL || "https://api.samnghethaycu.com",
   },
 

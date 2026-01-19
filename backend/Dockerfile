@@ -19,12 +19,27 @@ RUN npm install
 COPY . .
 
 # Build Medusa v2
-# This command does TWO things:
-# 1. Compiles TypeScript → dist/
-# 2. Builds Admin UI → .medusa/admin/ (runtime expects it here)
 RUN npm run build
 
-# Verify BOTH build locations
+# CRITICAL FIX: Detect admin location and move to runtime expected location
+# Medusa v2 builds admin to dist/public/admin but runtime expects .medusa/admin
+RUN echo "=== DETECTING ADMIN BUILD LOCATION ===" && \
+    if [ -d "dist/public/admin" ]; then \
+        echo "✓ Found admin at dist/public/admin"; \
+        echo "Moving to .medusa/admin for runtime..."; \
+        mkdir -p .medusa/admin && \
+        cp -r dist/public/admin/* .medusa/admin/ && \
+        echo "✓ Admin moved successfully"; \
+    elif [ -d ".medusa/admin" ]; then \
+        echo "✓ Admin already at .medusa/admin"; \
+    else \
+        echo "✗ ERROR: Admin build not found!"; \
+        echo "Searching for admin files..."; \
+        find . -name "index.html" -type f 2>/dev/null || true; \
+        exit 1; \
+    fi
+
+# Verify final admin location
 RUN echo "=== VERIFYING BUILD OUTPUT ===" && \
     echo "Backend build:" && \
     ls -la dist && \
@@ -32,7 +47,7 @@ RUN echo "=== VERIFYING BUILD OUTPUT ===" && \
     echo "Admin build (.medusa/admin - runtime location):" && \
     ls -la .medusa/admin && \
     test -f .medusa/admin/index.html && \
-    echo "✓ Admin panel found at .medusa/admin/index.html"
+    echo "✓ Admin panel verified at .medusa/admin/index.html"
 
 # Production image
 FROM base AS runner
