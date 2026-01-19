@@ -19,15 +19,20 @@ RUN npm install
 COPY . .
 
 # Build Medusa v2
-# This compiles TypeScript AND builds Admin UI into dist/public/admin/
+# This command does TWO things:
+# 1. Compiles TypeScript → dist/
+# 2. Builds Admin UI → .medusa/admin/ (runtime expects it here)
 RUN npm run build
 
-# Verify build artifacts exist
+# Verify BOTH build locations
 RUN echo "=== VERIFYING BUILD OUTPUT ===" && \
+    echo "Backend build:" && \
     ls -la dist && \
-    ls -la dist/public && \
-    ls -la dist/public/admin && \
-    echo "✓ Admin panel found at dist/public/admin"
+    echo "" && \
+    echo "Admin build (.medusa/admin - runtime location):" && \
+    ls -la .medusa/admin && \
+    test -f .medusa/admin/index.html && \
+    echo "✓ Admin panel found at .medusa/admin/index.html"
 
 # Production image
 FROM base AS runner
@@ -36,21 +41,28 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # Copy built artifacts from builder
-# dist/ contains BOTH backend code AND admin UI (at dist/public/admin/)
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/.medusa ./.medusa
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/medusa-config.ts ./
+COPY --from=builder /app/tsconfig.json ./
 
 # Verify admin panel exists in production image
 RUN echo "=== PRODUCTION IMAGE VERIFICATION ===" && \
-    ls -la dist/public/admin && \
-    test -f dist/public/admin/index.html && \
-    echo "✓ Admin panel verified: dist/public/admin/index.html exists"
+    echo "Checking .medusa/admin (runtime location):" && \
+    ls -la .medusa/admin && \
+    test -f .medusa/admin/index.html && \
+    echo "✓ Admin panel verified at .medusa/admin/index.html" && \
+    echo "" && \
+    echo "Checking backend dist:" && \
+    ls -la dist && \
+    echo "✓ Production image ready"
 
 # Expose Medusa ports
 EXPOSE 9000
 
 # Start Medusa in production mode
-# Medusa automatically serves admin from dist/public/admin/
+# API: http://localhost:9000/
+# Admin UI: http://localhost:9000/app (serves from .medusa/admin/)
 CMD ["npm", "start"]
