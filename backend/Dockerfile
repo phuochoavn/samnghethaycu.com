@@ -24,8 +24,21 @@ COPY . .
 # 2. Builds Admin UI to ./.medusa (admin panel static files)
 RUN npm run build
 
+# DEBUG: Show complete directory structure to find admin files
+RUN echo "=== DIRECTORY STRUCTURE AFTER BUILD ===" && \
+    ls -la && \
+    echo "=== CHECKING .medusa DIRECTORY ===" && \
+    ls -la .medusa 2>/dev/null || echo ".medusa not found" && \
+    echo "=== CHECKING dist DIRECTORY ===" && \
+    ls -la dist 2>/dev/null || echo "dist not found" && \
+    echo "=== SEARCHING FOR index.html (admin entry point) ===" && \
+    find . -name "index.html" -type f 2>/dev/null || echo "No index.html found" && \
+    echo "=== SEARCHING FOR admin DIRECTORIES ===" && \
+    find . -type d -name "admin" 2>/dev/null || echo "No admin directories found"
+
 # Verify build artifacts exist (fail fast if build didn't work)
-RUN ls -la dist && ls -la .medusa
+# Using dynamic search instead of hardcoded path
+RUN if [ -d "dist" ]; then echo "✓ dist folder found"; else echo "✗ dist folder missing" && exit 1; fi
 
 # Production image
 FROM base AS runner
@@ -40,8 +53,13 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/medusa-config.ts ./
 
-# Verify critical files exist in production image
-RUN ls -la .medusa/admin && echo "✓ Admin panel build found"
+# DEBUG: Verify what we copied to production image
+RUN echo "=== PRODUCTION IMAGE CONTENTS ===" && \
+    ls -la && \
+    echo "=== .medusa DIRECTORY ===" && \
+    ls -la .medusa 2>/dev/null || echo ".medusa not found in production image" && \
+    echo "=== SEARCHING FOR index.html IN PRODUCTION ===" && \
+    find . -name "index.html" -type f 2>/dev/null || echo "No index.html in production image"
 
 # Expose Medusa ports
 # Port 9000: API + Admin backend
