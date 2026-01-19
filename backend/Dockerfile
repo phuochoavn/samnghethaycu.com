@@ -19,26 +19,15 @@ RUN npm install
 COPY . .
 
 # Build Medusa v2
-# This command does TWO things:
-# 1. Compiles TypeScript to ./dist (backend code)
-# 2. Builds Admin UI to ./.medusa (admin panel static files)
+# This compiles TypeScript AND builds Admin UI into dist/public/admin/
 RUN npm run build
 
-# DEBUG: Show complete directory structure to find admin files
-RUN echo "=== DIRECTORY STRUCTURE AFTER BUILD ===" && \
-    ls -la && \
-    echo "=== CHECKING .medusa DIRECTORY ===" && \
-    ls -la .medusa 2>/dev/null || echo ".medusa not found" && \
-    echo "=== CHECKING dist DIRECTORY ===" && \
-    ls -la dist 2>/dev/null || echo "dist not found" && \
-    echo "=== SEARCHING FOR index.html (admin entry point) ===" && \
-    find . -name "index.html" -type f 2>/dev/null || echo "No index.html found" && \
-    echo "=== SEARCHING FOR admin DIRECTORIES ===" && \
-    find . -type d -name "admin" 2>/dev/null || echo "No admin directories found"
-
-# Verify build artifacts exist (fail fast if build didn't work)
-# Using dynamic search instead of hardcoded path
-RUN if [ -d "dist" ]; then echo "✓ dist folder found"; else echo "✗ dist folder missing" && exit 1; fi
+# Verify build artifacts exist
+RUN echo "=== VERIFYING BUILD OUTPUT ===" && \
+    ls -la dist && \
+    ls -la dist/public && \
+    ls -la dist/public/admin && \
+    echo "✓ Admin panel found at dist/public/admin"
 
 # Production image
 FROM base AS runner
@@ -47,25 +36,21 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # Copy built artifacts from builder
+# dist/ contains BOTH backend code AND admin UI (at dist/public/admin/)
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/.medusa ./.medusa
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/medusa-config.ts ./
 
-# DEBUG: Verify what we copied to production image
-RUN echo "=== PRODUCTION IMAGE CONTENTS ===" && \
-    ls -la && \
-    echo "=== .medusa DIRECTORY ===" && \
-    ls -la .medusa 2>/dev/null || echo ".medusa not found in production image" && \
-    echo "=== SEARCHING FOR index.html IN PRODUCTION ===" && \
-    find . -name "index.html" -type f 2>/dev/null || echo "No index.html in production image"
+# Verify admin panel exists in production image
+RUN echo "=== PRODUCTION IMAGE VERIFICATION ===" && \
+    ls -la dist/public/admin && \
+    test -f dist/public/admin/index.html && \
+    echo "✓ Admin panel verified: dist/public/admin/index.html exists"
 
 # Expose Medusa ports
-# Port 9000: API + Admin backend
-# Port 7001: Admin UI (if using separate admin server)
-EXPOSE 9000 7001
+EXPOSE 9000
 
 # Start Medusa in production mode
-# This serves both API and pre-built Admin UI
+# Medusa automatically serves admin from dist/public/admin/
 CMD ["npm", "start"]
