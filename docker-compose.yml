@@ -1,26 +1,57 @@
-version: "3.8"
+version: '3.8'
 
+# ==========================================
+# NETWORKS
+# ==========================================
+networks:
+  # External Traefik network (must exist: docker network create traefik-public)
+  traefik-public:
+    external: true
+
+  # Internal network for backend services
+  internal-net:
+    driver: bridge
+
+# ==========================================
+# VOLUMES
+# ==========================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  # Named volume for uploads (prevents shadowing)
+  medusa_uploads:
+    driver: local
+
+# ==========================================
+# SERVICES
+# ==========================================
 services:
-  # PostgreSQL Database (Internal Only)
+  # ==========================================
+  # POSTGRESQL DATABASE
+  # ==========================================
   postgres:
     image: postgres:16-alpine
     container_name: samnghethaycu_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: medusa
-      POSTGRES_PASSWORD: medusa
-      POSTGRES_DB: medusa_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U medusa"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - samnghethaycu_network
+      - internal-net
 
-  # Redis Cache & Event Bus (Internal Only)
+  # ==========================================
+  # REDIS (CACHE & EVENT BUS)
+  # ==========================================
   redis:
     image: redis:7-alpine
     container_name: samnghethaycu_redis
@@ -33,15 +64,18 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - samnghethaycu_network
+      - internal-net
 
-  # Medusa v2 Backend (API + Admin)
-  # GOLDEN ARCHITECTURE: App runs from /app/server (WORKDIR in Dockerfile)
-  backend:
+  # ==========================================
+  # MEDUSA SERVER (API + ADMIN)
+  # WORKER_MODE=server
+  # ==========================================
+  medusa-server:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: samnghethaycu_backend
+      target: runner
+    container_name: samnghethaycu_medusa_server
     restart: unless-stopped
     depends_on:
       postgres:
@@ -49,56 +83,106 @@ services:
       redis:
         condition: service_healthy
     environment:
+      # Core
       NODE_ENV: production
-      DATABASE_URL: postgresql://medusa:medusa@postgres:5432/medusa_db
+      MEDUSA_WORKER_MODE: server
+
+      # Database & Cache
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
+
+      # Secrets
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+
+      # Backend URL (for admin dashboard)
       MEDUSA_BACKEND_URL: https://api.samnghethaycu.com
-      JWT_SECRET: supersecret_change_in_production
-      COOKIE_SECRET: supersecret_change_in_production
-      STORE_CORS: https://samnghethaycu.com,https://www.samnghethaycu.com
+
+      # CORS Configuration
       ADMIN_CORS: https://admin.samnghethaycu.com
-      AUTH_CORS: https://samnghethaycu.com,https://www.samnghethaycu.com,https://admin.samnghethaycu.com
-      MEDUSA_WORKER_MODE: shared
-    # GOLDEN ARCHITECTURE: Mount uploads to /app/server/uploads (WORKDIR changed)
-    # DO NOT mount source code - use built artifacts from Docker image
+      STORE_CORS: https://samnghethaycu.com,https://www.samnghethaycu.com
+      AUTH_CORS: https://admin.samnghethaycu.com,https://samnghethaycu.com,https://www.samnghethaycu.com
     volumes:
-      - backend_uploads:/app/server/uploads
+      # CRITICAL: Only mount uploads directory (no source code!)
+      # Path matches WORKDIR /app/server from Dockerfile
+      - medusa_uploads:/app/server/uploads
+    networks:
+      - internal-net
+      - traefik-public
     labels:
       # Enable Traefik
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
 
       # ==========================================
-      # API Router (api.samnghethaycu.com → backend:9000)
+      # API ROUTER (api.samnghethaycu.com)
       # ==========================================
-      - "traefik.http.routers.samnghethaycu-api.rule=Host(`api.samnghethaycu.com`)"
-      - "traefik.http.routers.samnghethaycu-api.entrypoints=websecure"
-      - "traefik.http.routers.samnghethaycu-api.tls.certresolver=le"
-      - "traefik.http.routers.samnghethaycu-api.service=samnghethaycu-api-service"
-      - "traefik.http.services.samnghethaycu-api-service.loadbalancer.server.port=9000"
+      - "traefik.http.routers.medusa-api.rule=Host(`api.samnghethaycu.com`)"
+      - "traefik.http.routers.medusa-api.entrypoints=websecure"
+      - "traefik.http.routers.medusa-api.tls=true"
+      - "traefik.http.routers.medusa-api.tls.certresolver=le"
+      - "traefik.http.routers.medusa-api.service=medusa-api-service"
+      - "traefik.http.services.medusa-api-service.loadbalancer.server.port=9000"
 
       # ==========================================
-      # Admin Router (admin.samnghethaycu.com → backend:9000/app)
-      # GOLDEN ARCHITECTURE: Redirect root to /app
+      # ADMIN REDIRECT MIDDLEWARE
+      # Redirects admin.samnghethaycu.com/ → admin.samnghethaycu.com/app
       # ==========================================
-
-      # Middleware: Redirect admin.samnghethaycu.com/ → admin.samnghethaycu.com/app
-      - "traefik.http.middlewares.admin-redirect.redirectregex.regex=^https://admin\\.samnghethaycu\\.com/$$"
+      - "traefik.http.middlewares.admin-redirect.redirectregex.regex=^https://admin\\.samnghethaycu\\.com/?$$"
       - "traefik.http.middlewares.admin-redirect.redirectregex.replacement=https://admin.samnghethaycu.com/app"
       - "traefik.http.middlewares.admin-redirect.redirectregex.permanent=true"
 
-      # Admin Router Configuration
-      - "traefik.http.routers.samnghethaycu-admin.rule=Host(`admin.samnghethaycu.com`)"
-      - "traefik.http.routers.samnghethaycu-admin.entrypoints=websecure"
-      - "traefik.http.routers.samnghethaycu-admin.tls.certresolver=le"
-      - "traefik.http.routers.samnghethaycu-admin.service=samnghethaycu-admin-service"
-      - "traefik.http.routers.samnghethaycu-admin.middlewares=admin-redirect"
-      - "traefik.http.services.samnghethaycu-admin-service.loadbalancer.server.port=9000"
-    networks:
-      - traefik-public
-      - samnghethaycu_network
+      # ==========================================
+      # ADMIN ROUTER (admin.samnghethaycu.com)
+      # ==========================================
+      - "traefik.http.routers.medusa-admin.rule=Host(`admin.samnghethaycu.com`)"
+      - "traefik.http.routers.medusa-admin.entrypoints=websecure"
+      - "traefik.http.routers.medusa-admin.tls=true"
+      - "traefik.http.routers.medusa-admin.tls.certresolver=le"
+      - "traefik.http.routers.medusa-admin.middlewares=admin-redirect"
+      - "traefik.http.routers.medusa-admin.service=medusa-admin-service"
+      - "traefik.http.services.medusa-admin-service.loadbalancer.server.port=9000"
 
-  # Next.js Storefront
+  # ==========================================
+  # MEDUSA WORKER (BACKGROUND JOBS)
+  # WORKER_MODE=worker
+  # ==========================================
+  medusa-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runner
+    container_name: samnghethaycu_medusa_worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Core
+      NODE_ENV: production
+      MEDUSA_WORKER_MODE: worker
+
+      # Database & Cache
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+
+      # Secrets
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+
+      # Disable admin build for worker
+      DISABLE_MEDUSA_ADMIN: "true"
+    volumes:
+      # Worker also needs uploads access (e.g., CSV imports, image processing)
+      - medusa_uploads:/app/server/uploads
+    networks:
+      - internal-net
+
+  # ==========================================
+  # NEXT.JS STOREFRONT (OPTIONAL)
+  # ==========================================
   storefront:
     build:
       context: ./storefront
@@ -106,42 +190,26 @@ services:
     container_name: samnghethaycu_storefront
     restart: unless-stopped
     depends_on:
-      - backend
+      - medusa-server
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_MEDUSA_BACKEND_URL: https://api.samnghethaycu.com
-      NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY: ""
+      NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY: ${MEDUSA_PUBLISHABLE_KEY}
+    networks:
+      - traefik-public
+      - internal-net
     labels:
       # Enable Traefik
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
 
-      # Storefront Router (samnghethaycu.com + www → port 3000)
-      - "traefik.http.routers.samnghethaycu-storefront.rule=Host(`samnghethaycu.com`) || Host(`www.samnghethaycu.com`)"
-      - "traefik.http.routers.samnghethaycu-storefront.entrypoints=websecure"
-      - "traefik.http.routers.samnghethaycu-storefront.tls.certresolver=le"
-      - "traefik.http.services.samnghethaycu-storefront.loadbalancer.server.port=3000"
+      # Storefront Router (samnghethaycu.com + www)
+      - "traefik.http.routers.storefront.rule=Host(`samnghethaycu.com`) || Host(`www.samnghethaycu.com`)"
+      - "traefik.http.routers.storefront.entrypoints=websecure"
+      - "traefik.http.routers.storefront.tls=true"
+      - "traefik.http.routers.storefront.tls.certresolver=le"
+      - "traefik.http.services.storefront.loadbalancer.server.port=3000"
 
-      # HTTP to HTTPS redirect middleware
-      - "traefik.http.middlewares.samnghethaycu-redirect.redirectscheme.scheme=https"
-      - "traefik.http.middlewares.samnghethaycu-redirect.redirectscheme.permanent=true"
-    networks:
-      - traefik-public
-      - samnghethaycu_network
-
-volumes:
-  postgres_data:
-    driver: local
-  redis_data:
-    driver: local
-  backend_uploads:
-    driver: local
-
-networks:
-  # Internal network for backend-postgres-redis communication
-  samnghethaycu_network:
-    driver: bridge
-
-  # External Traefik network (must exist on VPS)
-  traefik-public:
-    external: true
+      # HTTP to HTTPS redirect
+      - "traefik.http.middlewares.storefront-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.storefront-redirect.redirectscheme.permanent=true"

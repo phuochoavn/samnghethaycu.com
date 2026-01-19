@@ -1,80 +1,106 @@
+# ==========================================
+# STAGE 1: Base & Dependencies
+# ==========================================
 FROM node:20-alpine AS base
+WORKDIR /app
 
-# ============================================
-# STAGE 1: Dependencies
-# ============================================
+# Install system dependencies for native modules (sharp, etc.)
+RUN apk add --no-cache libc6-compat python3 make g++
+
+# ==========================================
+# STAGE 2: Dependencies Installation
+# ==========================================
 FROM base AS deps
 WORKDIR /app
 
-# Copy package files
 COPY package.json package-lock.json* ./
 
-# Install dependencies
-RUN npm ci
+# Install ALL dependencies (including devDeps for build)
+RUN if [ -f package-lock.json ]; then \
+      npm ci; \
+    else \
+      npm install; \
+    fi
 
-# ============================================
-# STAGE 2: Builder
-# ============================================
+# ==========================================
+# STAGE 3: Builder
+# ==========================================
 FROM base AS builder
 WORKDIR /app
 
 # Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
 
-# Copy source code
+# Copy application source
 COPY . .
 
-# Build Medusa v2
-# This creates .medusa/server/ with the complete built application
+# Environment variables required for build (Admin generation)
+ENV NODE_ENV=production
+ENV MEDUSA_ADMIN_ONBOARDING_TYPE=nextjs
+
+# Build Medusa v2 - Generates .medusa/server directory
 RUN npm run build
 
 # Verify build output
-RUN echo "=== VERIFYING MEDUSA V2 BUILD OUTPUT ===" && \
+RUN echo "=== BUILD VERIFICATION ===" && \
     ls -la .medusa/server && \
     echo "" && \
-    echo "Checking for admin build:" && \
+    echo "Admin build location:" && \
     ls -la .medusa/server/public/admin && \
     test -f .medusa/server/public/admin/index.html && \
-    echo "✓ Admin panel found at .medusa/server/public/admin/index.html" && \
-    echo "" && \
-    echo "✓ Build successful - Medusa v2 architecture verified"
+    echo "✓ Admin panel verified at .medusa/server/public/admin/index.html"
 
-# ============================================
-# STAGE 3: Production Runner
-# ============================================
-FROM base AS runner
+# Prune devDependencies to keep image small
+RUN npm prune --production
 
-# CRITICAL: Set working directory to /app/server
-# This is where Medusa v2 builds the complete application
-# When the app runs from here, it correctly resolves relative paths to public/admin
+# ==========================================
+# STAGE 4: Production Runner
+# ==========================================
+FROM node:20-alpine AS runner
+
+# CRITICAL: WORKDIR must be /app/server (where Medusa builds to)
+# This aligns runtime context with build artifacts
 WORKDIR /app/server
 
 ENV NODE_ENV=production
 
-# Copy the built application from builder
-# Medusa v2 builds everything into .medusa/server/
-COPY --from=builder /app/.medusa/server ./
+# Install runtime dependencies only
+RUN apk add --no-cache libc6-compat
 
-# Copy node_modules (contains runtime dependencies)
-COPY --from=builder /app/node_modules ./node_modules
+# Create non-root user for security
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 medusa
+
+# CRITICAL: Copy .medusa/server/* to /app/server
+# This is the complete built application (backend + admin)
+COPY --from=builder --chown=medusa:nodejs /app/.medusa/server ./
+
+# Copy production node_modules
+COPY --from=builder --chown=medusa:nodejs /app/node_modules ./node_modules
+
+# Create uploads directory with correct permissions
+RUN mkdir -p uploads && chown -R medusa:nodejs uploads
 
 # Verify production image structure
 RUN echo "=== PRODUCTION IMAGE VERIFICATION ===" && \
     pwd && \
     echo "" && \
-    echo "Application structure:" && \
+    echo "Directory structure:" && \
     ls -la && \
     echo "" && \
-    echo "Admin location:" && \
+    echo "Admin location (relative to WORKDIR):" && \
     ls -la public/admin && \
     test -f public/admin/index.html && \
-    echo "✓ Admin panel verified at public/admin/index.html" && \
-    echo "" && \
-    echo "✓ Production image ready - WORKDIR=/app/server"
+    echo "✓ Production image ready - Admin at public/admin/index.html"
 
-# Expose Medusa port
+# Switch to non-root user
+USER medusa
+
 EXPOSE 9000
 
-# Start Medusa in production mode
-# Running from /app/server, Medusa naturally finds public/admin/
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:9000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+
+# Start Medusa (running from /app/server)
 CMD ["npm", "run", "start"]
