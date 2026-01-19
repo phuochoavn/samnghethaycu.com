@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "medusa develop",
-    "build": "tsc -p tsconfig.json",
+    "build": "medusa build",
     "start": "medusa start",
     "migration:generate": "medusa migrations generate",
     "migration:run": "medusa migrations run",
@@ -15,13 +15,12 @@
     "@medusajs/medusa": "^2.0.0",
     "@medusajs/cache-redis": "^2.0.0",
     "@medusajs/event-bus-redis": "^2.0.0",
-    "@medusajs/workflow-engine-redis": "^2.0.0",
-    "@medusajs/file-local": "^2.0.0",
     "awilix": "^10.0.2",
     "pg": "^8.11.3",
     "redis": "^4.6.13"
   },
   "devDependencies": {
+    "@medusajs/admin-sdk": "^2.0.0",
     "@types/node": "^20.11.5",
     "typescript": "^5.3.3",
     "ts-node": "^10.9.2"
