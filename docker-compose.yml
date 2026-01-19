@@ -10,7 +10,6 @@ services:
       POSTGRES_USER: medusa
       POSTGRES_PASSWORD: medusa
       POSTGRES_DB: medusa_db
-    # NO PORT MAPPING - Internal access only
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -26,7 +25,6 @@ services:
     image: redis:7-alpine
     container_name: samnghethaycu_redis
     restart: unless-stopped
-    # NO PORT MAPPING - Internal access only
     volumes:
       - redis_data:/data
     healthcheck:
@@ -37,7 +35,8 @@ services:
     networks:
       - samnghethaycu_network
 
-  # Medusa v2 Backend (API + Admin on port 9000)
+  # Medusa v2 Backend (API + Admin)
+  # GOLDEN ARCHITECTURE: App runs from /app/server (WORKDIR in Dockerfile)
   backend:
     build:
       context: ./backend
@@ -60,34 +59,41 @@ services:
       ADMIN_CORS: https://admin.samnghethaycu.com
       AUTH_CORS: https://samnghethaycu.com,https://www.samnghethaycu.com,https://admin.samnghethaycu.com
       MEDUSA_WORKER_MODE: shared
-    # PRODUCTION-READY: CRITICAL - Only mount uploads volume
-    # DO NOT mount source code (./backend:/app) - this would shadow built files!
-    # The built artifacts (.medusa/admin, dist/) are inside the Docker image
+    # GOLDEN ARCHITECTURE: Mount uploads to /app/server/uploads (WORKDIR changed)
+    # DO NOT mount source code - use built artifacts from Docker image
     volumes:
-      - backend_uploads:/app/uploads
+      - backend_uploads:/app/server/uploads
     labels:
       # Enable Traefik
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-public"
 
+      # ==========================================
       # API Router (api.samnghethaycu.com → backend:9000)
+      # ==========================================
       - "traefik.http.routers.samnghethaycu-api.rule=Host(`api.samnghethaycu.com`)"
       - "traefik.http.routers.samnghethaycu-api.entrypoints=websecure"
       - "traefik.http.routers.samnghethaycu-api.tls.certresolver=le"
       - "traefik.http.routers.samnghethaycu-api.service=samnghethaycu-api-service"
       - "traefik.http.services.samnghethaycu-api-service.loadbalancer.server.port=9000"
 
-      # FIXED: Admin Router (admin.samnghethaycu.com → backend:9000/app)
-      # In Medusa v2, admin UI is served from backend on port 9000 at /app path
+      # ==========================================
+      # Admin Router (admin.samnghethaycu.com → backend:9000/app)
+      # GOLDEN ARCHITECTURE: Redirect root to /app
+      # ==========================================
+
+      # Middleware: Redirect admin.samnghethaycu.com/ → admin.samnghethaycu.com/app
+      - "traefik.http.middlewares.admin-redirect.redirectregex.regex=^https://admin\\.samnghethaycu\\.com/$$"
+      - "traefik.http.middlewares.admin-redirect.redirectregex.replacement=https://admin.samnghethaycu.com/app"
+      - "traefik.http.middlewares.admin-redirect.redirectregex.permanent=true"
+
+      # Admin Router Configuration
       - "traefik.http.routers.samnghethaycu-admin.rule=Host(`admin.samnghethaycu.com`)"
       - "traefik.http.routers.samnghethaycu-admin.entrypoints=websecure"
       - "traefik.http.routers.samnghethaycu-admin.tls.certresolver=le"
       - "traefik.http.routers.samnghethaycu-admin.service=samnghethaycu-admin-service"
-      # CRITICAL FIX: Admin uses port 9000 (same as API), not 7001
+      - "traefik.http.routers.samnghethaycu-admin.middlewares=admin-redirect"
       - "traefik.http.services.samnghethaycu-admin-service.loadbalancer.server.port=9000"
-      # Optional: Add path prefix middleware if needed (Medusa serves admin at /app by default)
-      # - "traefik.http.middlewares.admin-stripprefix.stripprefix.prefixes=/app"
-      # - "traefik.http.routers.samnghethaycu-admin.middlewares=admin-stripprefix"
     networks:
       - traefik-public
       - samnghethaycu_network
@@ -105,7 +111,6 @@ services:
       NODE_ENV: production
       NEXT_PUBLIC_MEDUSA_BACKEND_URL: https://api.samnghethaycu.com
       NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY: ""
-    # PRODUCTION-READY: No volume mounts - use built Next.js standalone image
     labels:
       # Enable Traefik
       - "traefik.enable=true"

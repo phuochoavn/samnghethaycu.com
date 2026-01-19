@@ -1,100 +1,80 @@
 FROM node:20-alpine AS base
 
-# Install dependencies and build
-FROM base AS builder
+# ============================================
+# STAGE 1: Dependencies
+# ============================================
+FROM base AS deps
 WORKDIR /app
 
 # Copy package files
-COPY package.json ./
+COPY package.json package-lock.json* ./
 
-# CRITICAL: Remove package-lock.json to force fresh dependency resolution
-# This prevents @medusajs/admin-sdk version conflicts
-RUN rm -f package-lock.json
+# Install dependencies
+RUN npm ci
 
-# Install ALL dependencies (including devDependencies for build)
-# This ensures we get the latest compatible versions of Medusa v2 packages
-RUN npm install
+# ============================================
+# STAGE 2: Builder
+# ============================================
+FROM base AS builder
+WORKDIR /app
+
+# Copy dependencies from deps stage
+COPY --from=deps /app/node_modules ./node_modules
 
 # Copy source code
 COPY . .
 
 # Build Medusa v2
+# This creates .medusa/server/ with the complete built application
 RUN npm run build
 
-# SHOTGUN APPROACH: Copy admin build to ALL possible locations
-# Medusa runtime is picky - we don't know exactly where it looks, so put it EVERYWHERE
-RUN echo "=== SHOTGUN APPROACH: COPYING ADMIN TO ALL LOCATIONS ===" && \
+# Verify build output
+RUN echo "=== VERIFYING MEDUSA V2 BUILD OUTPUT ===" && \
+    ls -la .medusa/server && \
     echo "" && \
-    echo "Source location:" && \
-    ls -la dist/public/admin && \
+    echo "Checking for admin build:" && \
+    ls -la .medusa/server/public/admin && \
+    test -f .medusa/server/public/admin/index.html && \
+    echo "✓ Admin panel found at .medusa/server/public/admin/index.html" && \
     echo "" && \
-    echo "Copying to Location A: .medusa/admin" && \
-    mkdir -p .medusa/admin && \
-    cp -r dist/public/admin/* .medusa/admin/ && \
-    ls -la .medusa/admin && \
-    echo "✓ Copied to .medusa/admin" && \
-    echo "" && \
-    echo "Copying to Location B: .medusa/server/admin" && \
-    mkdir -p .medusa/server/admin && \
-    cp -r dist/public/admin/* .medusa/server/admin/ && \
-    ls -la .medusa/server/admin && \
-    echo "✓ Copied to .medusa/server/admin" && \
-    echo "" && \
-    echo "Keeping original at: dist/public/admin" && \
-    echo "✓ Original preserved" && \
-    echo "" && \
-    echo "=== VERIFICATION: Checking all index.html locations ===" && \
-    test -f dist/public/admin/index.html && echo "✓ dist/public/admin/index.html EXISTS" && \
-    test -f .medusa/admin/index.html && echo "✓ .medusa/admin/index.html EXISTS" && \
-    test -f .medusa/server/admin/index.html && echo "✓ .medusa/server/admin/index.html EXISTS" && \
-    echo "" && \
-    echo "🎯 SHOTGUN COMPLETE: Admin available in 3 locations!"
+    echo "✓ Build successful - Medusa v2 architecture verified"
 
-# Production image
+# ============================================
+# STAGE 3: Production Runner
+# ============================================
 FROM base AS runner
-WORKDIR /app
+
+# CRITICAL: Set working directory to /app/server
+# This is where Medusa v2 builds the complete application
+# When the app runs from here, it correctly resolves relative paths to public/admin
+WORKDIR /app/server
 
 ENV NODE_ENV=production
 
-# Copy built artifacts from builder
-# Include ALL possible admin locations
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/.medusa ./.medusa
+# Copy the built application from builder
+# Medusa v2 builds everything into .medusa/server/
+COPY --from=builder /app/.medusa/server ./
+
+# Copy node_modules (contains runtime dependencies)
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/medusa-config.ts ./
-COPY --from=builder /app/tsconfig.json ./
 
-# Verify ALL admin locations exist in production image
+# Verify production image structure
 RUN echo "=== PRODUCTION IMAGE VERIFICATION ===" && \
+    pwd && \
     echo "" && \
-    echo "Location A: .medusa/admin" && \
-    ls -la .medusa/admin && \
-    test -f .medusa/admin/index.html && \
-    echo "✓ .medusa/admin/index.html verified" && \
+    echo "Application structure:" && \
+    ls -la && \
     echo "" && \
-    echo "Location B: .medusa/server/admin" && \
-    ls -la .medusa/server/admin && \
-    test -f .medusa/server/admin/index.html && \
-    echo "✓ .medusa/server/admin/index.html verified" && \
+    echo "Admin location:" && \
+    ls -la public/admin && \
+    test -f public/admin/index.html && \
+    echo "✓ Admin panel verified at public/admin/index.html" && \
     echo "" && \
-    echo "Location C: dist/public/admin" && \
-    ls -la dist/public/admin && \
-    test -f dist/public/admin/index.html && \
-    echo "✓ dist/public/admin/index.html verified" && \
-    echo "" && \
-    echo "Backend dist:" && \
-    ls -la dist && \
-    echo "" && \
-    echo "🎯 ALL LOCATIONS VERIFIED - Production image ready!"
+    echo "✓ Production image ready - WORKDIR=/app/server"
 
-# Expose Medusa ports
+# Expose Medusa port
 EXPOSE 9000
 
 # Start Medusa in production mode
-# Admin available at ALL of these paths:
-# - .medusa/admin/
-# - .medusa/server/admin/
-# - dist/public/admin/
-# Medusa will find it wherever it looks!
-CMD ["npm", "start"]
+# Running from /app/server, Medusa naturally finds public/admin/
+CMD ["npm", "run", "start"]
