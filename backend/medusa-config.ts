@@ -34,15 +34,14 @@ export default defineConfig({
   /**
    * CRITICAL: Admin Panel Configuration
    *
-   * - disable: false → FORCES admin build in Docker/CI environments
-   * - path: "/app" → URL path where admin UI is served
-   * - backendUrl: Production API URL (browser needs to reach this)
+   * SHOTGUN APPROACH: Let Medusa use ALL defaults for paths.
+   * Dockerfile will place admin build in EVERY possible location.
    *
-   * Note: Admin build location is handled by Dockerfile (moves dist/public/admin → .medusa/admin)
+   * - disable: false → FORCES admin build in Docker/CI environments
+   * - backendUrl: Production API URL (browser needs to reach this)
    */
   admin: {
-    disable: false, // ✅ CRITICAL: Force admin build (fixes "No such file or directory")
-    path: "/app", // Admin UI served at https://api.samnghethaycu.com/app
+    disable: false, // ✅ CRITICAL: Force admin build
     backendUrl: process.env.MEDUSA_BACKEND_URL || "https://api.samnghethaycu.com",
   },
 
