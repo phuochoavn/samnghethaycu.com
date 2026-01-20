@@ -1,8 +1,12 @@
 # samnghethaycu.com - E-Commerce Platform
 
+> **🏢 MULTI-TENANT DEPLOYMENT**
+> This project is configured for deployment in a **shared VPS environment** with existing Traefik infrastructure.
+> **👉 For deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md)**
+
 ## Architecture Overview
 
-This is a headless commerce platform built with MedusaJS v2, deployed on DigitalOcean VPS using Docker Compose.
+This is a headless commerce platform built with MedusaJS v2, deployed on a shared DigitalOcean VPS using Docker Compose with namespace isolation.
 
 ### Tech Stack
 
@@ -44,9 +48,16 @@ This is a headless commerce platform built with MedusaJS v2, deployed on Digital
    - Two services: `medusa-server` (API + Admin) and `medusa-worker` (background jobs)
    - Controlled via `MEDUSA_WORKER_MODE` environment variable
 
+5. **Multi-Tenant Isolation**
+   - All containers namespaced with `sam_` prefix
+   - Integrates with existing Traefik instance via `traefik-public` network
+   - No port conflicts (80/443) - uses shared reverse proxy
+
 ## Deployment Instructions
 
-### Prerequisites
+**📖 For complete deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md)**
+
+### Quick Overview
 
 1. DigitalOcean VPS (Ubuntu 22.04 LTS recommended)
 2. Docker and Docker Compose installed
