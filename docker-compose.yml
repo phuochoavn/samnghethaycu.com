@@ -1,0 +1,207 @@
+version: "3.8"
+
+services:
+  # ============================================
+  # Traefik v3 - Reverse Proxy & SSL
+  # ============================================
+  traefik:
+    image: traefik:v3.2
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+    command:
+      # API and Dashboard
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
+
+      # Providers
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+
+      # Entrypoints
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+
+      # Certificate Resolvers (Let's Encrypt)
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+
+      # Logs
+      - "--log.level=INFO"
+      - "--accesslog=true"
+    labels:
+      # Enable Traefik dashboard
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.samnghethaycu.com`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.middlewares=dashboard-auth"
+      - "traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH}"
+    networks:
+      - medusa_network
+
+  # ============================================
+  # PostgreSQL 16 - Database
+  # ============================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: medusa
+      POSTGRES_PASSWORD: medusa
+      POSTGRES_DB: medusa_db
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medusa -d medusa_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - medusa_network
+
+  # ============================================
+  # Redis 7 - Cache & Event Bus
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - medusa_network
+
+  # ============================================
+  # Medusa Server (API + Admin)
+  # ============================================
+  medusa-server:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runner
+    container_name: medusa_server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MEDUSA_BACKEND_URL: ${MEDUSA_BACKEND_URL}
+      STORE_CORS: ${STORE_CORS}
+      ADMIN_CORS: ${ADMIN_CORS}
+      AUTH_CORS: ${AUTH_CORS}
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      MEDUSA_WORKER_MODE: server
+      DISABLE_MEDUSA_ADMIN: "false"
+      PORT: 9000
+    volumes:
+      # CRITICAL: Only mount uploads, NOT source code (Rule 2)
+      - medusa_uploads:/app/server/uploads
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:9000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    networks:
+      - medusa_network
+    labels:
+      - "traefik.enable=true"
+
+      # API Routes (api.samnghethaycu.com)
+      - "traefik.http.routers.medusa-api.rule=Host(`api.samnghethaycu.com`)"
+      - "traefik.http.routers.medusa-api.entrypoints=websecure"
+      - "traefik.http.routers.medusa-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.medusa-api.service=medusa-api"
+      - "traefik.http.services.medusa-api.loadbalancer.server.port=9000"
+
+      # Admin Routes (admin.samnghethaycu.com)
+      - "traefik.http.routers.medusa-admin.rule=Host(`admin.samnghethaycu.com`)"
+      - "traefik.http.routers.medusa-admin.entrypoints=websecure"
+      - "traefik.http.routers.medusa-admin.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.medusa-admin.service=medusa-admin"
+      - "traefik.http.routers.medusa-admin.middlewares=admin-redirect"
+      - "traefik.http.services.medusa-admin.loadbalancer.server.port=9000"
+
+      # Admin Redirect Middleware (Rule 3)
+      # Redirect root domain to /app path
+      - "traefik.http.middlewares.admin-redirect.redirectregex.regex=^https://admin\\.samnghethaycu\\.com/$$"
+      - "traefik.http.middlewares.admin-redirect.redirectregex.replacement=https://admin.samnghethaycu.com/app"
+      - "traefik.http.middlewares.admin-redirect.redirectregex.permanent=false"
+
+  # ============================================
+  # Medusa Worker (Background Jobs)
+  # ============================================
+  medusa-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runner
+    container_name: medusa_worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      medusa-server:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MEDUSA_BACKEND_URL: ${MEDUSA_BACKEND_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      MEDUSA_WORKER_MODE: worker
+      DISABLE_MEDUSA_ADMIN: "true"
+    volumes:
+      # Shared uploads volume
+      - medusa_uploads:/app/server/uploads
+    networks:
+      - medusa_network
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  medusa_uploads:
+    driver: local
+  traefik_letsencrypt:
+    driver: local
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  medusa_network:
+    driver: bridge
