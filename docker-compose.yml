@@ -1,0 +1,172 @@
+version: "3.8"
+
+services:
+  # ============================================
+  # PostgreSQL 16 - Database (Namespaced)
+  # ============================================
+  sam_postgres:
+    image: postgres:16-alpine
+    container_name: sam_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: medusa
+      POSTGRES_PASSWORD: medusa
+      POSTGRES_DB: medusa_db
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - sam_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medusa -d medusa_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sam_medusa_network
+
+  # ============================================
+  # Redis 7 - Cache & Event Bus (Namespaced)
+  # ============================================
+  sam_redis:
+    image: redis:7-alpine
+    container_name: sam_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - sam_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sam_medusa_network
+
+  # ============================================
+  # Medusa Server (API + Admin) - Dual Network
+  # ============================================
+  sam_medusa_server:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runner
+    container_name: sam_medusa_server
+    restart: unless-stopped
+    depends_on:
+      sam_postgres:
+        condition: service_healthy
+      sam_redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MEDUSA_BACKEND_URL: ${MEDUSA_BACKEND_URL}
+      STORE_CORS: ${STORE_CORS}
+      ADMIN_CORS: ${ADMIN_CORS}
+      AUTH_CORS: ${AUTH_CORS}
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      MEDUSA_WORKER_MODE: server
+      DISABLE_MEDUSA_ADMIN: "false"
+      PORT: 9000
+    volumes:
+      # CRITICAL: Only mount uploads, NOT source code (Rule 2)
+      - sam_medusa_uploads:/app/server/uploads
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:9000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    networks:
+      # CRITICAL: Connect to BOTH networks
+      # - Internal network for DB/Redis communication
+      # - External network for Traefik ingress
+      - sam_medusa_network
+      - traefik-public
+    labels:
+      # Enable Traefik routing
+      - "traefik.enable=true"
+
+      # CRITICAL: Specify which network Traefik should use
+      - "traefik.docker.network=traefik-public"
+
+      # API Routes (api.samnghethaycu.com)
+      # Namespaced router/service names to avoid conflicts
+      - "traefik.http.routers.sam-api.rule=Host(`api.samnghethaycu.com`)"
+      - "traefik.http.routers.sam-api.entrypoints=websecure"
+      - "traefik.http.routers.sam-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.sam-api.service=sam-api"
+      - "traefik.http.services.sam-api.loadbalancer.server.port=9000"
+
+      # Admin Routes (admin.samnghethaycu.com)
+      # Namespaced router/service/middleware names
+      - "traefik.http.routers.sam-admin.rule=Host(`admin.samnghethaycu.com`)"
+      - "traefik.http.routers.sam-admin.entrypoints=websecure"
+      - "traefik.http.routers.sam-admin.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.sam-admin.service=sam-admin"
+      - "traefik.http.routers.sam-admin.middlewares=sam-admin-redirect"
+      - "traefik.http.services.sam-admin.loadbalancer.server.port=9000"
+
+      # Admin Redirect Middleware (Rule 3) - Namespaced
+      # Redirect root domain to /app path
+      - "traefik.http.middlewares.sam-admin-redirect.redirectregex.regex=^https://admin\\.samnghethaycu\\.com/$$"
+      - "traefik.http.middlewares.sam-admin-redirect.redirectregex.replacement=https://admin.samnghethaycu.com/app"
+      - "traefik.http.middlewares.sam-admin-redirect.redirectregex.permanent=false"
+
+  # ============================================
+  # Medusa Worker (Background Jobs) - Internal Only
+  # ============================================
+  sam_medusa_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runner
+    container_name: sam_medusa_worker
+    restart: unless-stopped
+    depends_on:
+      sam_postgres:
+        condition: service_healthy
+      sam_redis:
+        condition: service_healthy
+      sam_medusa_server:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MEDUSA_BACKEND_URL: ${MEDUSA_BACKEND_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      MEDUSA_WORKER_MODE: worker
+      DISABLE_MEDUSA_ADMIN: "true"
+    volumes:
+      # Shared uploads volume
+      - sam_medusa_uploads:/app/server/uploads
+    networks:
+      # Worker only needs internal network
+      - sam_medusa_network
+
+# ============================================
+# Volumes (Namespaced)
+# ============================================
+volumes:
+  sam_postgres_data:
+    driver: local
+  sam_redis_data:
+    driver: local
+  sam_medusa_uploads:
+    driver: local
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  # Internal network for DB/Redis/Worker communication
+  sam_medusa_network:
+    driver: bridge
+
+  # External network - connects to existing Traefik instance
+  # This network MUST already exist on the VPS
+  traefik-public:
+    external: true

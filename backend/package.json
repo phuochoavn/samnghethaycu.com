@@ -1,0 +1,41 @@
+{
+  "name": "samnghethaycu-backend",
+  "version": "1.0.0",
+  "description": "MedusaJS v2 Backend for samnghethaycu.com",
+  "author": "samnghethaycu.com",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "medusa develop",
+    "build": "medusa build",
+    "start": "medusa start",
+    "predeploy": "medusa db:migrate",
+    "seed": "medusa db:seed",
+    "db:migrate": "medusa db:migrate",
+    "db:create": "medusa db:create"
+  },
+  "dependencies": {
+    "@medusajs/admin-sdk": "latest",
+    "@medusajs/framework": "latest",
+    "@medusajs/medusa": "latest",
+    "@medusajs/medusa-cli": "latest",
+    "@medusajs/event-bus-redis": "latest",
+    "@medusajs/workflow-engine-redis": "latest",
+    "@medusajs/cache-redis": "latest",
+    "@medusajs/file-local": "latest",
+    "awilix": "^10.0.2",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
